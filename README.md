@@ -1,0 +1,133 @@
+# dsh-message-translator
+
+DeepSeek Harness（DSH）の回答を、ローカルの Ollama で翻訳してセッションへ記録するプラグインです。
+
+- 翻訳は **127.0.0.1 の Ollama**（既定 `http://127.0.0.1:11434`）へ投げます。外部 API や API キーは不要です。
+- ターンが完了したとき、そのターンの**最後の回答**だけを翻訳します。ツール呼び出しの途中説明や reasoning は対象外です。
+- 結果は `plugin:message-translator/translation` という **plugin record** として同じセッションログへ追記します。元の会話は変更しません。
+- Ollama が落ちていても会話は壊れません。翻訳の失敗は警告ログに留めます。
+
+## 動作
+
+```
+assistant/message（最後の本文を保持）
+        ↓
+turn/end（reason が completed のときだけ）
+        ↓
+コードブロックを退避 → 長文を段落単位で分割
+        ↓
+Ollama /api/chat で 1 断片ずつ翻訳
+        ↓
+plugin:message-translator/translation を追記 → flush
+```
+
+記録されるデータは次の形です。後から GUI 側で「翻訳に切り替える」UI を作るときは、この record を読むだけで済みます。
+
+```json
+{
+  "turn": 3,
+  "step": 5,
+  "messageSeq": 42,
+  "text": "翻訳された本文",
+  "model": "qwen3:8b",
+  "targetLanguage": "Japanese",
+  "sourceLanguage": "auto",
+  "recipe": "ollama-chat-v1:qwen3:8b:Japanese:auto",
+  "createdAt": "2026-11-06T03:40:00.000Z"
+}
+```
+
+`messageSeq` は翻訳対象になった `assistant/message` のイベント seq です。原文と対応付けるときに使います。
+
+## インストール
+
+```sh
+# このリポジトリのディレクトリで
+dsh plugin --profile web add .
+
+# もしくは GitHub から
+dsh plugin --profile web add github:todashuta/dsh-message-translator
+```
+
+`dsh plugin add` はプロファイルの `package.json` に依存を追加し、`dsh.profile.bundles` へバンドルを登録します。同梱の `cordis.patch.yml` がプラグイン行を挿入します。
+
+Ollama が起動していることを確認してください。
+
+```sh
+curl http://127.0.0.1:11434/api/tags
+```
+
+## 設定
+
+プロファイルの `cordis.patch.yml` で、挿入された行の `config` を上書きできます。パッチは行の `config` 全体を置き換えるので、必要なキーをすべて書いてください。
+
+```yaml
+- id: message-translator
+  config:
+    endpoint: http://127.0.0.1:11434
+    model: qwen3:8b
+    targetLanguage: Japanese
+    sourceLanguage: auto
+    maxTextChars: 4000
+    timeoutMs: 120000
+    temperature: 0.2
+    enabled: true
+```
+
+| キー | 既定値 | 意味 |
+|---|---|---|
+| `endpoint` | `http://127.0.0.1:11434` | Ollama の基底 URL |
+| `model` | `qwen3:8b` | 翻訳に使うモデル。`ollama list` で確認する |
+| `targetLanguage` | `Japanese` | 翻訳先の言語名 |
+| `sourceLanguage` | `auto` | 原文の言語名。`auto` なら自動判定 |
+| `maxTextChars` | `4000` | 1 リクエストの最大文字数。超えたら分割 |
+| `timeoutMs` | `120000` | Ollama 1 リクエストの期限 |
+| `temperature` | `0.2` | サンプリング温度 |
+| `enabled` | `true` | `false` でプラグインを休止 |
+
+## 仕組み
+
+- **コードブロックは翻訳しません。** フェンス付きコードブロックをプレースホルダへ退避し、翻訳後に元の位置へ戻します。小さいモデルがコードを壊すのを防ぐためです。モデルがプレースホルダを落とした場合は、コードブロックを翻訳結果の末尾へ原文のまま追加します。
+- **長文は段落単位で分割します。** `maxTextChars` を超える回答は、空行の位置を優先して複数リクエストに分けます。
+- **失敗は本体を止めません。** Ollama 未起動、モデル不在、タイムアウトなどは `warn` ログになり、会話はそのまま続行します。
+- **セッション終了時は翻訳をキャンセルします。** 閉じたセッションへ record を追記しようとはしません。
+
+## テスト
+
+```sh
+npm test
+```
+
+Ollama の実プロセスは使わず、fetch と翻訳関数をモックして検証します。
+
+## 制限
+
+- 翻訳はターン完了後のバックグラウンド処理です。長い回答では翻訳が終わるまで数秒〜数十秒かかります。
+- 翻訳結果の表示はまだ実装していません。このバージョンは記録までです。GUI 側の切替 UI は後から追加できます。
+- plugin record は実験的な保持扱いです。DSH のセッション形式移行で失われる可能性があります。
+- サブエージェントのセッションも同じ条件で翻訳対象になります。
+
+## ライセンス
+
+MIT
+
+### 統合確認（モック Ollama）
+
+実際の Ollama を使わずに、DSH の headless プロファイルで 1 ターン流し、
+セッションログへ record が追記されるところまで確認できます。
+
+```sh
+# ターミナル 1: モック Ollama（127.0.0.1:11434）
+node tools/mock-ollama.js
+
+# ターミナル 2: 検証用プロファイル（DSH の checkout で実行）
+export DSH_HOME=/tmp/dsh-translator-test
+pnpm dsh --profile translator-test --from-default-profile headless --dump-config
+pnpm dsh plugin --profile translator-test add /path/to/dsh-message-translator
+pnpm dsh --profile translator-test "hello"
+```
+
+検証用プロファイルの `cordis.patch.yml` には、LLM の設定（`llm-pi-ai` と
+`agent-default-model`）と、`message-translator` の `endpoint` をモックへ向ける
+上書きを書いてください。セッションログに `plugin:message-translator/translation`
+が `turn/end` の後に現れれば成功です。

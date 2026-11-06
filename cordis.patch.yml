@@ -1,0 +1,12 @@
+# dsh-message-translator bundle patch。
+# プロファイルにこのバンドルを入れると、ホスト側プラグインが 1 行増える。
+# Ollama のモデルやエンドポイントを変えたい場合は、この行の config を
+# プロファイルの cordis.patch.yml で上書きする。
+- insert:
+    - id: message-translator
+      name: dsh-message-translator
+      config:
+        endpoint: http://127.0.0.1:11434
+        model: qwen3:8b
+        targetLanguage: Japanese
+        sourceLanguage: auto
