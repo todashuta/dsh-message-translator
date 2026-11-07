@@ -13,13 +13,15 @@ DeepSeek Harness（DSH）の回答を、ローカルの Ollama で翻訳して�
 ```
 assistant/message（最後の本文を保持）
         ↓
-turn/end（reason が completed のときだけ）
+agent/turn-stopping（正常完了するターンだけ）
         ↓
 コードブロックを退避 → 長文を段落単位で分割
         ↓
-Ollama /api/chat で 1 断片ずつ翻訳
+Ollama で 1 断片ずつ翻訳
         ↓
 plugin:message-translator/translation を追記 → flush
+        ↓
+turn/end
 ```
 
 記録されるデータは次の形です。後から GUI 側で「翻訳に切り替える」UI を作るときは、この record を読むだけで済みます。
@@ -86,6 +88,7 @@ curl http://127.0.0.1:11434/api/tags
 | `sourceLanguage` | `auto` | 原文の言語名。`auto` なら自動判定。`plamo` では未使用 |
 | `form` | `auto` | 日本語の文体。`auto` / `plain` / `polite`。`plamo` のときだけ有効 |
 | `maxTextChars` | `4000` | 1 リクエストの最大文字数。超えたら分割 |
+| `numCtx` | `8192` | Ollama のコンテキスト長。長い回答では広げる |
 | `timeoutMs` | `120000` | Ollama 1 リクエストの期限 |
 | `temperature` | `0.2` | サンプリング温度 |
 | `enabled` | `true` | `false` でプラグインを休止 |
@@ -160,4 +163,4 @@ pnpm dsh --profile translator-test "hello"
 検証用プロファイルの `cordis.patch.yml` には、LLM の設定（`llm-pi-ai` と
 `agent-default-model`）と、`message-translator` の `endpoint` をモックへ向ける
 上書きを書いてください。セッションログに `plugin:message-translator/translation`
-が `turn/end` の後に現れれば成功です。
+が `turn/end` の直前に現れれば成功です。

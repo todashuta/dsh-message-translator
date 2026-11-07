@@ -71,24 +71,32 @@ PFML3 の組み立て方と `target_lang` の言語コードは、モデルカ�
 
 ## dsh-message-translator との組み合わせ
 
-`Modelfile.plamo-ja` を使う場合、プラグインの設定は次のようになります。
+プラグインは `provider: plamo` で PFML3 を自前で組み立て、`/api/generate` に
+`raw: true` で渡します。Modelfile のチャットテンプレートは使わないため、
+`Modelfile.plamo-raw` または `ollama pull hf.co/...` で取り込んだモデルを
+そのまま指定できます。
 
 ```yaml
 - id: message-translator
   config:
-    endpoint: http://127.0.0.1:11434
-    model: plamo-3-translate:0.8b
-    targetLanguage: Japanese
+    provider: plamo
+    model: hf.co/pfnet/plamo-3-translate-0.8b-GGUF:Q4_K_M
+    targetLanguage: ja
+    form: polite
     temperature: 0
-    maxTextChars: 3000
+    numCtx: 8192
 ```
 
-`Modelfile.plamo-ja` のテンプレートは system メッセージを使わないため、
-プラグインが送る system prompt は無視されます。翻訳先は Modelfile 側の
-`ja` が使われます。`targetLanguage` は記録用のメタデータとして残ります。
+実機（Ollama v0.40.15）で次の翻訳を確認しました。
 
-`Modelfile.plamo-raw` を使う場合は、プラグイン側に PFML3 を組み立てる
-モードが必要です（未実装）。それまでは `Modelfile.plamo-ja` を使ってください。
+- 原文: `The lighthouse swept its steady beam across the dark water, a quiet promise that the shore was still there.`
+- 訳文: `灯台は暗い水面を一定の光束で照らし、岸はまだそこにあるという静かな約束を告げました。`
+
+コードブロックのプレースホルダ `[[CODE_BLOCK_0]]` も保持されることを
+確認しています。
+
+`Modelfile.plamo-ja` は `/api/chat` を直接使うクライアント向けです。
+プラグインの `plamo` モードでは使いません。
 
 ## 注意
 

@@ -15,6 +15,7 @@ const base = {
   system: 'system prompt',
   user: 'こんにちは',
   temperature: 0.2,
+  numCtx: 8192,
   timeoutMs: 5000,
 }
 
@@ -41,6 +42,7 @@ test('Ollama の chat API へモデル名・非ストリーミング・メッセ
   assert.equal(requests[0].init.model, 'qwen3:8b')
   assert.equal(requests[0].init.stream, false)
   assert.equal(requests[0].init.think, false)
+  assert.equal(requests[0].init.options.num_ctx, 8192)
   assert.deepEqual(requests[0].init.messages, [
     { role: 'system', content: 'system prompt' },
     { role: 'user', content: 'こんにちは' },
@@ -141,6 +143,7 @@ test('/api/generate には raw プロンプトと停止トークンをそのま�
   assert.equal(requests[0].init.stream, false)
   assert.match(requests[0].init.prompt, /^<\|plamo:tag\|>dataset/)
   assert.deepEqual(requests[0].init.options.stop, ['<|plamo:tag|>', '<|plamo:bos|>'])
+  assert.equal(requests[0].init.options.num_ctx, 8192)
 })
 
 test('/api/generate の HTTP エラーもステータスと本文を含む', async () => {

@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import { createRecorder } from '../lib/recorder.js'
 
 const session = (id = 's1') => ({ id })
+const turnSignal = () => new AbortController().signal
 
 const assistantMessage = (turn, step, text, seq) => ({
   type: 'assistant/message',
@@ -18,16 +19,9 @@ const assistantMessage = (turn, step, text, seq) => ({
   data: { turn, step, message: { content: [{ type: 'text', text }] } },
 })
 
-const turnEnd = (turn, kind = 'completed') => ({
-  type: 'turn/end',
-  seq: 999,
-  time: 0,
-  data: { turn, reason: { kind } },
-})
-
 const turnStart = () => ({ type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } })
 
-function recorderFor({ translate, maxConcurrent } = {}) {
+function recorderFor({ translate } = {}) {
   const records = []
   const warnings = []
   const flushes = []
@@ -51,13 +45,12 @@ function recorderFor({ translate, maxConcurrent } = {}) {
   return { recorder, records, warnings, flushes }
 }
 
-test('完了したターンの最終回答が翻訳され、plugin record として記録される', async () => {
+test('ターン終了時に、そのターンの最終回答が翻訳され plugin record として記録される', async () => {
   const { recorder, records, flushes } = recorderFor()
   const target = session()
 
   recorder.onEvent(target, assistantMessage(1, 1, 'Hello', 10))
-  recorder.onEvent(target, turnEnd(1))
-  await recorder.dispose()
+  await recorder.finishTurn(target, 1, turnSignal())
 
   assert.equal(records.length, 1)
   assert.equal(records[0].session, 's1')
@@ -82,8 +75,7 @@ test('途中の assistant メッセージではなく、ターンの最後の本
 
   recorder.onEvent(target, assistantMessage(1, 1, 'First step', 10))
   recorder.onEvent(target, assistantMessage(1, 2, 'Final answer', 12))
-  recorder.onEvent(target, turnEnd(1))
-  await recorder.dispose()
+  await recorder.finishTurn(target, 1, turnSignal())
 
   assert.equal(records.length, 1)
   assert.equal(records[0].data.text, '[ja] Final answer')
@@ -109,23 +101,19 @@ test('reasoning ブロックは翻訳対象に含めない', async () => {
       },
     },
   })
-  recorder.onEvent(target, turnEnd(1))
-  await recorder.dispose()
+  await recorder.finishTurn(target, 1, turnSignal())
 
   assert.equal(records[0].data.text, '[ja] Answer')
 })
 
-test('中断・失敗したターンは翻訳せず、記録も残さない', async () => {
-  for (const kind of ['aborted', 'error', 'blocked']) {
-    const { recorder, records } = recorderFor()
-    const target = session()
+test('turn-stopping が呼ばれないターン（中断・失敗）では翻訳も記録もしない', async () => {
+  const { recorder, records } = recorderFor()
+  const target = session()
 
-    recorder.onEvent(target, assistantMessage(1, 1, 'Partial', 10))
-    recorder.onEvent(target, turnEnd(1, kind))
-    await recorder.dispose()
+  recorder.onEvent(target, assistantMessage(1, 1, 'Partial', 10))
+  // turn-stopping は正常完了時だけ呼ばれる。ここでは呼ばない。
 
-    assert.equal(records.length, 0, `${kind} のターンで記録された`)
-  }
+  assert.equal(records.length, 0)
 })
 
 test('直前のターンの回答が別のターンの終了に混ざらない', async () => {
@@ -133,8 +121,7 @@ test('直前のターンの回答が別のターンの終了に混ざらない',
   const target = session()
 
   recorder.onEvent(target, assistantMessage(2, 1, 'Other turn', 10))
-  recorder.onEvent(target, turnEnd(1))
-  await recorder.dispose()
+  await recorder.finishTurn(target, 1, turnSignal())
 
   assert.equal(records.length, 0)
 })
@@ -145,8 +132,7 @@ test('ターン開始時に前のターンの未翻訳本文を破棄する', as
 
   recorder.onEvent(target, assistantMessage(1, 1, 'Old', 10))
   recorder.onEvent(target, turnStart())
-  recorder.onEvent(target, turnEnd(1))
-  await recorder.dispose()
+  await recorder.finishTurn(target, 1, turnSignal())
 
   assert.equal(records.length, 0)
 })
@@ -158,8 +144,7 @@ test('翻訳に失敗した場合は record を追記せず、警告だけ残す
   const target = session()
 
   recorder.onEvent(target, assistantMessage(1, 1, 'Hello', 10))
-  recorder.onEvent(target, turnEnd(1))
-  await recorder.dispose()
+  await recorder.finishTurn(target, 1, turnSignal())
 
   assert.equal(records.length, 0)
   assert.equal(warnings.length, 1)
@@ -172,24 +157,41 @@ test('空の回答は翻訳せず、記録もしない', async () => {
   const target = session()
 
   recorder.onEvent(target, assistantMessage(1, 1, '   ', 10))
-  recorder.onEvent(target, turnEnd(1))
-  await recorder.dispose()
+  await recorder.finishTurn(target, 1, turnSignal())
 
   assert.equal(records.length, 0)
 })
 
 test('セッションが閉じたら実行中の翻訳をキャンセルし、警告を出さない', async () => {
   const { recorder, records, warnings } = recorderFor({
-    translate: (text, signal) => new Promise((_resolve, reject) => {
+    translate: (_text, signal) => new Promise((_resolve, reject) => {
       signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
     }),
   })
   const target = session()
 
   recorder.onEvent(target, assistantMessage(1, 1, 'Hello', 10))
-  recorder.onEvent(target, turnEnd(1))
+  const finishing = recorder.finishTurn(target, 1, turnSignal())
   recorder.disposeSession(target)
-  await recorder.dispose()
+  await finishing
+
+  assert.equal(records.length, 0)
+  assert.equal(warnings.length, 0)
+})
+
+test('ターン自体がキャンセルされた場合も静かに中断する', async () => {
+  const { recorder, records, warnings } = recorderFor({
+    translate: (_text, signal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+    }),
+  })
+  const target = session()
+  const controller = new AbortController()
+
+  recorder.onEvent(target, assistantMessage(1, 1, 'Hello', 10))
+  const finishing = recorder.finishTurn(target, 1, controller.signal)
+  controller.abort()
+  await finishing
 
   assert.equal(records.length, 0)
   assert.equal(warnings.length, 0)
@@ -202,9 +204,8 @@ test('複数セッションの翻訳は互いに混ざらない', async () => {
 
   recorder.onEvent(first, assistantMessage(1, 1, 'A', 1))
   recorder.onEvent(second, assistantMessage(1, 1, 'B', 2))
-  recorder.onEvent(first, turnEnd(1))
-  recorder.onEvent(second, turnEnd(1))
-  await recorder.dispose()
+  await recorder.finishTurn(first, 1, turnSignal())
+  await recorder.finishTurn(second, 1, turnSignal())
 
   assert.deepEqual(records.map((record) => [record.session, record.data.text]), [
     ['a', '[ja] A'],

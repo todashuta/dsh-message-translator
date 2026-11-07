@@ -59,6 +59,8 @@ export const Config = z.object({
   form: z.union(['auto', 'plain', 'polite']).default('auto'),
   /** 1 リクエストあたりの最大文字数。超えた本文は段落単位で分割する。 */
   maxTextChars: z.natural().min(200).default(4_000),
+  /** Ollama に渡すコンテキスト長。長い回答を翻訳するときに広げる。 */
+  numCtx: z.natural().min(512).default(8_192),
   /** Ollama 1 リクエストの期限（ミリ秒）。 */
   timeoutMs: z.natural().min(1_000).max(600_000).default(120_000),
   /** サンプリング温度。翻訳は揺らぎを抑えたいので低め。 */
@@ -81,6 +83,7 @@ function createChatTranslate(config) {
       system: request.system,
       user: request.user,
       temperature: config.temperature,
+      numCtx: config.numCtx,
       timeoutMs: config.timeoutMs,
       signal: request.signal,
     }),
@@ -107,6 +110,7 @@ function createPlamoTranslate(config) {
       prompt: request.prompt,
       temperature: config.temperature,
       stop: PFML3_STOP,
+      numCtx: config.numCtx,
       timeoutMs: config.timeoutMs,
       signal: request.signal,
     }),
@@ -153,10 +157,17 @@ export function apply(ctx, config) {
   })
 
   ctx.on('session/event', (session, event) => recorder.onEvent(session, event))
+  // turn-stopping はターンが閉じる直前に直列で呼ばれる。ここで翻訳を待つと、
+  // turn/end の後にセッションが片付けられる前へ record を書き込める。
+  // 正常完了したターンでしか呼ばれないため、失敗・中断のターンは翻訳しない。
+  ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
+    await recorder.finishTurn(agent.session, turn, signal)
+  })
   ctx.on('session/disposed', (session) => recorder.disposeSession(session))
 
   ctx.effect(() => async () => {
-    lifetime.abort()
+    // 破棄時に実行中の翻訳を待つ。Ollama の応答は timeoutMs で必ず終わる。
     await recorder.dispose()
+    lifetime.abort()
   }, 'dsh-message-translator: drain translations')
 }
