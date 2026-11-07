@@ -16,7 +16,7 @@ const assistantMessage = (turn, step, text, seq) => ({
   type: 'assistant/message',
   seq,
   time: 0,
-  data: { turn, step, message: { content: [{ type: 'text', text }] } },
+  data: { turn, step, message: { id: 'msg-1', content: [{ type: 'text', text }] } },
 })
 
 const turnStart = () => ({ type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } })
@@ -59,6 +59,7 @@ test('ターン終了時に、そのターンの最終回答が翻訳され plug
     turn: 1,
     step: 1,
     messageSeq: 10,
+    messageId: 'msg-1',
     text: '[ja] Hello',
     model: 'qwen3:8b',
     targetLanguage: 'Japanese',
