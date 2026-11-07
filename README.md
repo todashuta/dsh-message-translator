@@ -134,17 +134,14 @@ npm test
 
 Ollama の実プロセスは使わず、fetch と翻訳関数をモックして検証します。
 
-## 翻訳の表示
+## 翻訳カード
 
 ホスト側が記録した `plugin:message-translator/translation` を、クライアント側の
-[lib/client.js](lib/client.js) が Turn の Location data として公開します。回答
-（`assistant-step`）のレンダラを置き換え、通常の回答部分を訳文にします。
-原文は「原文」の折りたたみの中に残ります。
+[lib/client.js](lib/client.js) が会話ノードとして描画します。回答の直後に
+「翻訳」カードが開いた状態で表示され、summary をクリックすると折りたためます。
 
-翻訳がまだ生成されていないターンやストリーミング中は、従来どおり原文を表示します。
-
-`lib/client.js` の変更は DSH のクライアントプラグイン HMR で反映されます。
-反映されない場合は DSH Web を再起動してください。
+カードの表示には DSH の再起動が必要です。クライアントバンドルは起動時に
+読み込まれるため、`lib/client.js` を更新しただけでは反映されません。
 
 ## 制限
 
