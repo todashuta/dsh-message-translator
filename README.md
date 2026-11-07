@@ -74,7 +74,7 @@ curl http://127.0.0.1:11434/api/tags
     targetLanguage: Japanese
     sourceLanguage: auto
     form: auto
-    maxTextChars: 4000
+    maxTextChars: 2000
     timeoutMs: 120000
     temperature: 0.2
     enabled: true
@@ -88,8 +88,8 @@ curl http://127.0.0.1:11434/api/tags
 | `targetLanguage` | `Japanese` | 翻訳先。`plamo` では言語コード（`ja`）を推奨 |
 | `sourceLanguage` | `auto` | 原文の言語名。`auto` なら自動判定。`plamo` では未使用 |
 | `form` | `auto` | 日本語の文体。`auto` / `plain` / `polite`。`plamo` のときだけ有効 |
-| `maxTextChars` | `4000` | 1 リクエストの最大文字数。超えたら分割 |
-| `numCtx` | `8192` | Ollama のコンテキスト長。長い回答では広げる |
+| `maxTextChars` | `2000` | 1 リクエストの最大文字数。超えたら段落・文末で分割 |
+| `numCtx` | `16384` | Ollama のコンテキスト長。入力と出力の合計が収まる範囲 |
 | `timeoutMs` | `120000` | Ollama 1 リクエストの期限 |
 | `temperature` | `0.2` | サンプリング温度 |
 | `enabled` | `true` | `false` でプラグインを休止 |
@@ -122,7 +122,7 @@ Ollama へのモデル登録は [ollama/README.md](ollama/README.md) を参照�
 ## 仕組み
 
 - **コードブロックは翻訳しません。** フェンス付きコードブロックをプレースホルダへ退避し、翻訳後に元の位置へ戻します。小さいモデルがコードを壊すのを防ぐためです。モデルがプレースホルダを落とした場合は、コードブロックを翻訳結果の末尾へ原文のまま追加します。
-- **長文は段落単位で分割します。** `maxTextChars` を超える回答は、空行の位置を優先して複数リクエストに分けます。
+- **長文は段落・文末単位で分割します。** `maxTextChars` を超える回答は、空行、文末、空白の順に切れ目を探して複数リクエストに分けます。
 - **失敗は本体を止めません。** Ollama 未起動、モデル不在、タイムアウトなどは `warn` ログになり、会話はそのまま続行します。
 - **セッション終了時は翻訳をキャンセルします。** 閉じたセッションへ record を追記しようとはしません。
 

@@ -57,10 +57,14 @@ export const Config = z.object({
   sourceLanguage: z.string().default('auto'),
   /** 日本語の文体。`plamo` で `targetLanguage` が ja のときだけ効く。 */
   form: z.union(['auto', 'plain', 'polite']).default('auto'),
-  /** 1 リクエストあたりの最大文字数。超えた本文は段落単位で分割する。 */
-  maxTextChars: z.natural().min(200).default(4_000),
-  /** Ollama に渡すコンテキスト長。長い回答を翻訳するときに広げる。 */
-  numCtx: z.natural().min(512).default(8_192),
+  /**
+   * 1 リクエストあたりの最大文字数。超えた本文は段落・文末単位で分割する。
+   * 日本語は 1 文字あたりのトークン数が多いので、入力と出力の合計が
+   * numCtx に収まるよう保守的にしている。
+   */
+  maxTextChars: z.natural().min(200).default(2_000),
+  /** Ollama に渡すコンテキスト長。入力と出力の合計がこの範囲に収まる。 */
+  numCtx: z.natural().min(512).default(16_384),
   /** Ollama 1 リクエストの期限（ミリ秒）。 */
   timeoutMs: z.natural().min(1_000).max(600_000).default(120_000),
   /** サンプリング温度。翻訳は揺らぎを抑えたいので低め。 */
@@ -73,9 +77,10 @@ export const Config = z.object({
  * 汎用モデル向けの翻訳器。system + user を `/api/chat` へ送る。
  *
  * @param {z.infer<typeof Config>} config
+ * @param {(usage: { promptTokens?: number, completionTokens?: number }) => void} onUsage
  * @returns {(text: string, signal?: AbortSignal) => Promise<string>}
  */
-function createChatTranslate(config) {
+function createChatTranslate(config, onUsage) {
   return createTranslate({
     chat: (request) => chatWithOllama({
       endpoint: config.endpoint,
@@ -86,6 +91,7 @@ function createChatTranslate(config) {
       numCtx: config.numCtx,
       timeoutMs: config.timeoutMs,
       signal: request.signal,
+      onUsage,
     }),
     buildRequest: (text) => ({
       system: translationSystemPrompt(config.targetLanguage, config.sourceLanguage),
@@ -99,9 +105,10 @@ function createChatTranslate(config) {
  * PLaMo 3 Translate 向けの翻訳器。PFML3 を `/api/generate` へ直接送る。
  *
  * @param {z.infer<typeof Config>} config
+ * @param {(usage: { promptTokens?: number, completionTokens?: number }) => void} onUsage
  * @returns {(text: string, signal?: AbortSignal) => Promise<string>}
  */
-function createPlamoTranslate(config) {
+function createPlamoTranslate(config, onUsage) {
   const target = languageCode(config.targetLanguage)
   return createTranslate({
     chat: (request) => generateWithOllama({
@@ -113,6 +120,7 @@ function createPlamoTranslate(config) {
       numCtx: config.numCtx,
       timeoutMs: config.timeoutMs,
       signal: request.signal,
+      onUsage,
     }),
     buildRequest: (text) => ({
       prompt: pfml3Prompt(text, target, config.form),
@@ -132,7 +140,12 @@ export function apply(ctx, config) {
 
   const lifetime = new AbortController()
   const plamo = config.provider === 'plamo'
-  const translate = plamo ? createPlamoTranslate(config) : createChatTranslate(config)
+  const onUsage = (usage) => {
+    ctx.logger.info(
+      `dsh-message-translator: prompt=${usage.promptTokens ?? '?'} completion=${usage.completionTokens ?? '?'} tokens`,
+    )
+  }
+  const translate = plamo ? createPlamoTranslate(config, onUsage) : createChatTranslate(config, onUsage)
   const recordedLanguage = plamo ? languageCode(config.targetLanguage) : config.targetLanguage
 
   const recorder = createRecorder({

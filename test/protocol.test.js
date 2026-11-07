@@ -123,3 +123,20 @@ test('PFML3 の output には言語と、指定時だけ文体が入る', () => 
 test('PFML3 の停止トークンは tag と bos の 2 つ', () => {
   assert.deepEqual(PFML3_STOP, ['<|plamo:tag|>', '<|plamo:bos|>'])
 })
+
+test('長い本文は文末で分割され、各断片が文末で終わる', () => {
+  const sentence = 'This is a sentence. '
+  const source = sentence.repeat(30)
+  const parts = splitText(source, 120)
+  assert.ok(parts.length > 1)
+  assert.equal(parts.join(''), source)
+  assert.ok(parts.every((part) => part.length <= 120))
+  assert.ok(parts.slice(0, -1).every((part) => /[.!?]\s*$/.test(part)))
+})
+
+test('日本語の文末でも分割される', () => {
+  const source = 'これは文です。'.repeat(30)
+  const parts = splitText(source, 50)
+  assert.equal(parts.join(''), source)
+  assert.ok(parts.slice(0, -1).every((part) => part.endsWith('。')))
+})

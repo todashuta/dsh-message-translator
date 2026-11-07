@@ -171,3 +171,25 @@ test('/api/generate の空応答も翻訳結果として受け付けない', asy
     },
   )
 })
+
+test('/api/chat の応答から入力・出力のトークン数を受け取れる', async () => {
+  const usages = []
+  const fetchImpl = async () => jsonResponse({
+    message: { role: 'assistant', content: 'Hello' },
+    prompt_eval_count: 12,
+    eval_count: 5,
+  })
+
+  await chatWithOllama({ ...base, fetchImpl, onUsage: (usage) => usages.push(usage) })
+
+  assert.deepEqual(usages, [{ promptTokens: 12, completionTokens: 5 }])
+})
+
+test('/api/generate の応答からも入力・出力のトークン数を受け取れる', async () => {
+  const usages = []
+  const fetchImpl = async () => jsonResponse({ response: 'x', prompt_eval_count: 7, eval_count: 3 })
+
+  await generateWithOllama({ ...base, prompt: 'x', fetchImpl, onUsage: (usage) => usages.push(usage) })
+
+  assert.deepEqual(usages, [{ promptTokens: 7, completionTokens: 3 }])
+})
