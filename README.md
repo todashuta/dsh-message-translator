@@ -88,7 +88,7 @@ curl http://127.0.0.1:11434/api/tags
 | `provider` | `chat` | `chat`（system + user の汎用形式）または `plamo`（PFML3） |
 | `endpoint` | `http://127.0.0.1:11434` | Ollama の基底 URL |
 | `model` | `qwen3:8b` | 翻訳に使うモデル。`ollama list` で確認する |
-| `targetLanguage` | `Japanese` | 翻訳先。`plamo` では言語コード（`ja`）を推奨 |
+| `targetLanguage` | `Japanese` | 翻訳先。`plamo` では言語コード（`ja`）を推奨。`ja(easy)` でやさしい日本語 |
 | `sourceLanguage` | `auto` | 原文の言語名。`auto` なら自動判定。`plamo` では未使用 |
 | `form` | `auto` | 日本語の文体。`auto` / `plain` / `polite`。`plamo` のときだけ有効 |
 | `maxTextChars` | `2000` | 1 リクエストの最大文字数。超えたら段落・文末で分割 |
@@ -121,6 +121,11 @@ curl http://127.0.0.1:11434/api/tags
 `targetLanguage` は言語コード（`ja`、`en`、`zh-hans` など）で指定します。
 よく使う言語名（`Japanese` など）は自動でコードへ変換されます。`form` は
 `auto` / `plain` / `polite` から選べます。
+
+`ja(easy)` を指定すると、やさしい日本語になります。PLaMo 2 の CLI にあった
+言語コードで、PLaMo 3 のモデルカードには載っていませんが、開発者が隠し機能
+として仕込んでいるものです。たとえば「既定」が「デフォルト」、「追記」が
+「書き足す」のように言い換えられます。
 
 Ollama へのモデル登録は [ollama/README.md](ollama/README.md) を参照してください。
 
