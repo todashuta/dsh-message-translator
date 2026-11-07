@@ -8,6 +8,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  languageCode,
+  PFML3_STOP,
+  pfml3Prompt,
   protectCodeBlocks,
   restoreCodeBlocks,
   splitText,
@@ -86,4 +89,37 @@ test('原文の言語が指定されたときは、自動判定ではなくそ�
   const prompt = translationSystemPrompt('Japanese', 'English')
   assert.match(prompt, /source language is English/)
   assert.doesNotMatch(prompt, /Detect the source language/)
+})
+
+test('言語名は PLaMo の言語コードへ変換され、コードはそのまま使える', () => {
+  assert.equal(languageCode('Japanese'), 'ja')
+  assert.equal(languageCode('日本語'), 'ja')
+  assert.equal(languageCode('English'), 'en')
+  assert.equal(languageCode('Chinese (Simplified)'), 'zh-hans')
+  assert.equal(languageCode('zh-Hans'), 'zh-hans')
+  assert.equal(languageCode('ja'), 'ja')
+})
+
+test('対応表にない言語名は変換せず、そのままモデルへ渡す', () => {
+  assert.equal(languageCode('Klingon'), 'Klingon')
+})
+
+test('PFML3 プロンプトは dataset・input・output をこの順に含み、BOS を持たない', () => {
+  assert.equal(
+    pfml3Prompt('Hello', 'ja'),
+    '<|plamo:tag|>dataset<|plamo:msg|>translation'
+      + '<|plamo:tag|>input<|plamo:msg|>Hello'
+      + '<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>ja'
+      + '<|plamo:msg|>',
+  )
+  assert.doesNotMatch(pfml3Prompt('Hello', 'ja'), /<\|plamo:bos\|>/)
+})
+
+test('PFML3 の output には言語と、指定時だけ文体が入る', () => {
+  assert.doesNotMatch(pfml3Prompt('Hello', 'ja'), /form/)
+  assert.match(pfml3Prompt('Hello', 'ja', 'polite'), /<\|plamo:key\|>form<\|plamo:val\|>polite<\|plamo:msg\|>$/)
+})
+
+test('PFML3 の停止トークンは tag と bos の 2 つ', () => {
+  assert.deepEqual(PFML3_STOP, ['<|plamo:tag|>', '<|plamo:bos|>'])
 })

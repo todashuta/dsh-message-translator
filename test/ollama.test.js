@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chatWithOllama, OllamaError } from '../lib/ollama.js'
+import { chatWithOllama, generateWithOllama, OllamaError } from '../lib/ollama.js'
 
 const base = {
   endpoint: 'http://127.0.0.1:11434',
@@ -115,6 +115,55 @@ test('呼び出し元がキャンセルした場合は ABORTED として区別�
     () => chatWithOllama({ ...base, signal: controller.signal, fetchImpl }),
     (error) => {
       assert.equal(error.code, 'ABORTED')
+      return true
+    },
+  )
+})
+
+test('/api/generate には raw プロンプトと停止トークンをそのまま渡す', async () => {
+  const requests = []
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), init: JSON.parse(init.body) })
+    return jsonResponse({ response: '会議は来週の月曜日に変更されました。' })
+  }
+
+  const result = await generateWithOllama({
+    ...base,
+    prompt: '<|plamo:tag|>dataset<|plamo:msg|>translation<|plamo:tag|>input<|plamo:msg|>Hello<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>ja<|plamo:msg|>',
+    stop: ['<|plamo:tag|>', '<|plamo:bos|>'],
+    fetchImpl,
+  })
+
+  assert.equal(result, '会議は来週の月曜日に変更されました。')
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].url, 'http://127.0.0.1:11434/api/generate')
+  assert.equal(requests[0].init.raw, true)
+  assert.equal(requests[0].init.stream, false)
+  assert.match(requests[0].init.prompt, /^<\|plamo:tag\|>dataset/)
+  assert.deepEqual(requests[0].init.options.stop, ['<|plamo:tag|>', '<|plamo:bos|>'])
+})
+
+test('/api/generate の HTTP エラーもステータスと本文を含む', async () => {
+  const fetchImpl = async () => jsonResponse({ error: 'model not found' }, 404)
+
+  await assert.rejects(
+    () => generateWithOllama({ ...base, prompt: 'x', fetchImpl }),
+    (error) => {
+      assert.equal(error.code, 'HTTP_ERROR')
+      assert.match(error.message, /HTTP 404/)
+      assert.match(error.message, /model not found/)
+      return true
+    },
+  )
+})
+
+test('/api/generate の空応答も翻訳結果として受け付けない', async () => {
+  const fetchImpl = async () => jsonResponse({ response: '' })
+
+  await assert.rejects(
+    () => generateWithOllama({ ...base, prompt: 'x', fetchImpl }),
+    (error) => {
+      assert.equal(error.code, 'INVALID_RESPONSE')
       return true
     },
   )

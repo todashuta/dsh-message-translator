@@ -1,0 +1,26 @@
+# PLaMo 3 Translate 0.8B を Ollama に登録するだけの最小 Modelfile。
+#
+# チャットテンプレートを書いていないので、`/api/chat` ではなく
+# `/api/generate` に `raw: true` を付けて、PFML3 プロンプトを直接渡す。
+# 翻訳先や文体を切り替えたい場合、こちらのほうが確実で融通が利く。
+#
+# 使い方:
+#   1. GGUF をこのディレクトリへ置く
+#   2. 下の FROM を実際のファイル名に合わせる
+#   3. ollama create plamo-3-translate:0.8b -f Modelfile.plamo-raw
+#
+# 呼び出し例:
+#   curl http://127.0.0.1:11434/api/generate -d '{
+#     "model": "plamo-3-translate:0.8b",
+#     "raw": true,
+#     "prompt": "<|plamo:tag|>dataset<|plamo:msg|>translation<|plamo:tag|>input<|plamo:msg|>The meeting has been rescheduled.<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>ja<|plamo:msg|>",
+#     "stream": false,
+#     "options": { "temperature": 0, "stop": ["<|plamo:tag|>", "<|plamo:bos|>"] }
+#   }'
+
+FROM ./plamo-3-translate-0.8b-Q4_K_M.gguf
+
+PARAMETER temperature 0
+PARAMETER stop "<|plamo:tag|>"
+PARAMETER stop "<|plamo:bos|>"
+PARAMETER num_ctx 16384

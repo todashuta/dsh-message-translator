@@ -2,6 +2,11 @@
  * dsh-message-translator — 回答をローカルの Ollama で翻訳し、セッションへ記録する
  * DSH プラグイン（ホスト側）。
  *
+ * 対応するモデルは 2 系統:
+ *   - `chat`: system + user のチャット形式を渡す汎用モデル（qwen3 など）。
+ *   - `plamo`: PLaMo 3 Translate の PFML3 プロンプトを組み立てて
+ *     `/api/generate` へ `raw: true` で渡す。翻訳専用モデル向け。
+ *
  * 設計の要点:
  *   - 翻訳はターン完了後にバックグラウンドで走らせ、本体のターンを遅らせない。
  *   - 結果は `plugin:message-translator/translation` として同じセッションログへ
@@ -17,7 +22,10 @@
 
 import z from '@deepseek-ai/schemastery'
 import { appendPluginRecord } from '@deepseek-ai/dsh-session'
-import { chatWithOllama } from './lib/ollama.js'
+import { chatWithOllama, generateWithOllama } from './lib/ollama.js'
+import {
+  languageCode, PFML3_STOP, pfml3Prompt, translationSystemPrompt,
+} from './lib/protocol.js'
 import { createRecorder } from './lib/recorder.js'
 import { createTranslate } from './lib/translation.js'
 
@@ -30,19 +38,25 @@ export const inject = ['sessions']
 /**
  * 設定フォームに出るフィールド。
  *
- * 既定のモデルは Ollama でよく使われる qwen3 の中位サイズにしている。
- * 実際に導入しているモデルは `/api/tags` で確認できるので、合わなければ
- * プロファイルの patch で上書きする。
+ * 既定は汎用のチャット形式。PLaMo 3 Translate を使う場合は
+ * `provider: plamo` と `model: plamo-3-translate:0.8b` を指定する。
  */
 export const Config = z.object({
+  /** 翻訳リクエストの形式。`chat` は汎用、`plamo` は PFML3。 */
+  provider: z.union(['chat', 'plamo']).default('chat'),
   /** Ollama の基底 URL。 */
   endpoint: z.string().default('http://127.0.0.1:11434'),
   /** 翻訳に使う Ollama のモデル名。 */
   model: z.string().default('qwen3:8b'),
-  /** 翻訳先の言語名。 */
+  /**
+   * 翻訳先。`chat` では言語名（Japanese）、`plamo` では言語コード（ja）を
+   * 推奨。よく使う言語名は `plamo` 側でコードへ変換する。
+   */
   targetLanguage: z.string().default('Japanese'),
-  /** 原文の言語名。`auto` なら Ollama に自動判定させる。 */
+  /** 原文の言語名。`auto` なら Ollama に自動判定させる。`plamo` では未使用。 */
   sourceLanguage: z.string().default('auto'),
+  /** 日本語の文体。`plamo` で `targetLanguage` が ja のときだけ効く。 */
+  form: z.union(['auto', 'plain', 'polite']).default('auto'),
   /** 1 リクエストあたりの最大文字数。超えた本文は段落単位で分割する。 */
   maxTextChars: z.natural().min(200).default(4_000),
   /** Ollama 1 リクエストの期限（ミリ秒）。 */
@@ -54,6 +68,56 @@ export const Config = z.object({
 })
 
 /**
+ * 汎用モデル向けの翻訳器。system + user を `/api/chat` へ送る。
+ *
+ * @param {z.infer<typeof Config>} config
+ * @returns {(text: string, signal?: AbortSignal) => Promise<string>}
+ */
+function createChatTranslate(config) {
+  return createTranslate({
+    chat: (request) => chatWithOllama({
+      endpoint: config.endpoint,
+      model: config.model,
+      system: request.system,
+      user: request.user,
+      temperature: config.temperature,
+      timeoutMs: config.timeoutMs,
+      signal: request.signal,
+    }),
+    buildRequest: (text) => ({
+      system: translationSystemPrompt(config.targetLanguage, config.sourceLanguage),
+      user: text,
+    }),
+    maxTextChars: config.maxTextChars,
+  })
+}
+
+/**
+ * PLaMo 3 Translate 向けの翻訳器。PFML3 を `/api/generate` へ直接送る。
+ *
+ * @param {z.infer<typeof Config>} config
+ * @returns {(text: string, signal?: AbortSignal) => Promise<string>}
+ */
+function createPlamoTranslate(config) {
+  const target = languageCode(config.targetLanguage)
+  return createTranslate({
+    chat: (request) => generateWithOllama({
+      endpoint: config.endpoint,
+      model: config.model,
+      prompt: request.prompt,
+      temperature: config.temperature,
+      stop: PFML3_STOP,
+      timeoutMs: config.timeoutMs,
+      signal: request.signal,
+    }),
+    buildRequest: (text) => ({
+      prompt: pfml3Prompt(text, target, config.form),
+    }),
+    maxTextChars: config.maxTextChars,
+  })
+}
+
+/**
  * プラグインをマウントする。
  *
  * @param {import('@deepseek-ai/cordis').Context} ctx
@@ -63,21 +127,9 @@ export function apply(ctx, config) {
   if (!config.enabled) return
 
   const lifetime = new AbortController()
-
-  const translate = createTranslate({
-    chat: ({ system, user, signal }) => chatWithOllama({
-      endpoint: config.endpoint,
-      model: config.model,
-      system,
-      user,
-      temperature: config.temperature,
-      timeoutMs: config.timeoutMs,
-      signal,
-    }),
-    maxTextChars: config.maxTextChars,
-    targetLanguage: config.targetLanguage,
-    sourceLanguage: config.sourceLanguage,
-  })
+  const plamo = config.provider === 'plamo'
+  const translate = plamo ? createPlamoTranslate(config) : createChatTranslate(config)
+  const recordedLanguage = plamo ? languageCode(config.targetLanguage) : config.targetLanguage
 
   const recorder = createRecorder({
     appendRecord: appendPluginRecord,
@@ -86,12 +138,16 @@ export function apply(ctx, config) {
     logger: ctx.logger,
     now: () => new Date(),
     recipe: {
+      provider: config.provider,
       model: config.model,
-      targetLanguage: config.targetLanguage,
+      targetLanguage: recordedLanguage,
       sourceLanguage: config.sourceLanguage,
+      ...plamo ? { form: config.form } : {},
       // 設定が変わると同じ原文でも別の訳になる。UI 側が再翻訳の要否を
       // 判断できるよう、翻訳結果を決める設定を 1 つの文字列に畳んでおく。
-      recipe: `ollama-chat-v1:${config.model}:${config.targetLanguage}:${config.sourceLanguage}`,
+      recipe: plamo
+        ? `plamo-pfml3-v1:${config.model}:${recordedLanguage}:${config.form}`
+        : `ollama-chat-v1:${config.model}:${config.targetLanguage}:${config.sourceLanguage}`,
     },
     lifetime: lifetime.signal,
   })

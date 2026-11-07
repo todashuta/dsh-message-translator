@@ -1,0 +1,33 @@
+# PLaMo 3 Translate 0.8B を Ollama のチャット API で使うための Modelfile。
+#
+# 使い方:
+#   1. GGUF をこのディレクトリへ置く
+#   2. 下の FROM を実際のファイル名に合わせる
+#   3. ollama create plamo-3-translate:0.8b -f Modelfile.plamo-ja
+#   4. ollama run plamo-3-translate:0.8b
+#
+# この形は「翻訳先は日本語固定」でよい場合のもの。翻訳先を切り替えたい
+# ときは、後述の Modelfile.plamo-raw と PFML3 プロンプト直接指定を使う。
+#
+# なぜ TEMPLATE を自分で書いているか:
+#   PLaMo 3 Translate の GGUF には Jinja のチャットテンプレートが埋め込まれて
+#   いるが、Ollama がそれを常に読むとは限らない。読まれない場合、Ollama の
+#   既定テンプレートである `{{ .Prompt }}` が使われ、PLaMo が期待する PFML3
+#   形式にならない。ここでは翻訳専用の最小テンプレートを明示して、GGUF の
+#   テンプレート対応に依存しないようにしている。
+
+FROM ./plamo-3-translate-0.8b-Q4_K_M.gguf
+
+# PFML3: dataset=translation, input=原文, output の言語を ja に固定。
+# {{ .Prompt }} は Ollama が渡す最後の user メッセージ。
+TEMPLATE """<|plamo:tag|>dataset<|plamo:msg|>translation<|plamo:tag|>input<|plamo:msg|>{{ .Prompt }}<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>ja<|plamo:msg|>"""
+
+# 翻訳は揺らぎを避けたいので greedy。
+PARAMETER temperature 0
+
+# PLaMo は訳文の後にこのトークンを出して停止する。
+PARAMETER stop "<|plamo:tag|>"
+PARAMETER stop "<|plamo:bos|>"
+
+# 入力と出力の合計。学習時の上限は 32768。メモリに余裕がなければ下げる。
+PARAMETER num_ctx 16384

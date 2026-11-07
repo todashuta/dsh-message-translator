@@ -6,6 +6,7 @@
     - id: message-translator
       name: dsh-message-translator
       config:
+        provider: chat
         endpoint: http://127.0.0.1:11434
         model: qwen3:8b
         targetLanguage: Japanese

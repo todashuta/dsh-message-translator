@@ -3,6 +3,7 @@
 DeepSeek Harness（DSH）の回答を、ローカルの Ollama で翻訳してセッションへ記録するプラグインです。
 
 - 翻訳は **127.0.0.1 の Ollama**（既定 `http://127.0.0.1:11434`）へ投げます。外部 API や API キーは不要です。
+- 翻訳専用モデルの [PLaMo 3 Translate](https://huggingface.co/pfnet/plamo-3-translate-0.8b-GGUF) にも対応しています（`provider: plamo`）。
 - ターンが完了したとき、そのターンの**最後の回答**だけを翻訳します。ツール呼び出しの途中説明や reasoning は対象外です。
 - 結果は `plugin:message-translator/translation` という **plugin record** として同じセッションログへ追記します。元の会話は変更しません。
 - Ollama が落ちていても会話は壊れません。翻訳の失敗は警告ログに留めます。
@@ -64,10 +65,12 @@ curl http://127.0.0.1:11434/api/tags
 ```yaml
 - id: message-translator
   config:
+    provider: chat
     endpoint: http://127.0.0.1:11434
     model: qwen3:8b
     targetLanguage: Japanese
     sourceLanguage: auto
+    form: auto
     maxTextChars: 4000
     timeoutMs: 120000
     temperature: 0.2
@@ -76,14 +79,41 @@ curl http://127.0.0.1:11434/api/tags
 
 | キー | 既定値 | 意味 |
 |---|---|---|
+| `provider` | `chat` | `chat`（system + user の汎用形式）または `plamo`（PFML3） |
 | `endpoint` | `http://127.0.0.1:11434` | Ollama の基底 URL |
 | `model` | `qwen3:8b` | 翻訳に使うモデル。`ollama list` で確認する |
-| `targetLanguage` | `Japanese` | 翻訳先の言語名 |
-| `sourceLanguage` | `auto` | 原文の言語名。`auto` なら自動判定 |
+| `targetLanguage` | `Japanese` | 翻訳先。`plamo` では言語コード（`ja`）を推奨 |
+| `sourceLanguage` | `auto` | 原文の言語名。`auto` なら自動判定。`plamo` では未使用 |
+| `form` | `auto` | 日本語の文体。`auto` / `plain` / `polite`。`plamo` のときだけ有効 |
 | `maxTextChars` | `4000` | 1 リクエストの最大文字数。超えたら分割 |
 | `timeoutMs` | `120000` | Ollama 1 リクエストの期限 |
 | `temperature` | `0.2` | サンプリング温度 |
 | `enabled` | `true` | `false` でプラグインを休止 |
+
+## PLaMo 3 Translate を使う
+
+翻訳専用モデルの [PLaMo 3 Translate](https://huggingface.co/pfnet/plamo-3-translate-0.8b-GGUF)
+を使う場合は `provider: plamo` にします。PFML3 プロンプトを組み立てて
+`/api/generate` に `raw: true` で渡すため、Ollama のチャットテンプレートの
+解釈に依存しません。
+
+```yaml
+- id: message-translator
+  config:
+    provider: plamo
+    endpoint: http://127.0.0.1:11434
+    model: plamo-3-translate:0.8b
+    targetLanguage: ja
+    form: polite
+    temperature: 0
+```
+
+`targetLanguage` は言語コード（`ja`、`en`、`zh-hans` など）で指定します。
+よく使う言語名（`Japanese` など）は自動でコードへ変換されます。`form` は
+`auto` / `plain` / `polite` から選べます。
+
+Ollama へのモデル登録は [ollama/README.md](ollama/README.md) を参照してください。
+
 
 ## 仕組み
 

@@ -8,11 +8,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTranslate } from '../lib/translation.js'
+import { translationSystemPrompt } from '../lib/protocol.js'
 
 const base = {
+  buildRequest: (text) => ({ user: text }),
   maxTextChars: 4000,
-  targetLanguage: 'Japanese',
-  sourceLanguage: 'auto',
 }
 
 test('本文が翻訳され、コードブロックは原文のまま復元される', async () => {
@@ -63,7 +63,11 @@ test('キャンセル済みの信号では Ollama を呼ばずに中断する', 
 test('system prompt には翻訳先の言語が渡される', async () => {
   let system = ''
   const chat = async (request) => { system = request.system; return 'x' }
-  const translate = createTranslate({ ...base, targetLanguage: 'French', chat })
+  const translate = createTranslate({
+    ...base,
+    buildRequest: (text) => ({ system: translationSystemPrompt('French', 'auto'), user: text }),
+    chat,
+  })
 
   await translate('本文')
 
