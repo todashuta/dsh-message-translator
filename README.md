@@ -108,6 +108,8 @@ curl http://127.0.0.1:11434/api/tags
     endpoint: http://127.0.0.1:11434
     model: plamo-3-translate:0.8b
     targetLanguage: ja
+    # 日本語の文体。polite は敬体（です・ます）、plain は常体（だ・である）。
+    # targetLanguage が ja のときだけ効く。auto なら指定しない。
     form: polite
     temperature: 0
 ```
