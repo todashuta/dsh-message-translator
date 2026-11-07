@@ -16,7 +16,7 @@ assistant/message（最後の本文を保持）
         ↓
 agent/turn-stopping（正常完了するターンだけ）
         ↓
-コードブロックを退避 → 長文を段落単位で分割
+コードブロックを退避 → 長文を段落・文末単位で分割
         ↓
 Ollama で 1 断片ずつ翻訳
         ↓
@@ -25,14 +25,16 @@ plugin:message-translator/translation を追記 → flush
 turn/end
 ```
 
-記録されるデータは次の形です。後から GUI 側で「翻訳に切り替える」UI を作るときは、この record を読むだけで済みます。
+記録されるデータは次の形です。クライアント側の翻訳カードは、この record を読んで表示します。
 
 ```json
 {
   "turn": 3,
   "step": 5,
   "messageSeq": 42,
+  "messageId": "01J...",
   "text": "翻訳された本文",
+  "provider": "chat",
   "model": "qwen3:8b",
   "targetLanguage": "Japanese",
   "sourceLanguage": "auto",
@@ -41,7 +43,7 @@ turn/end
 }
 ```
 
-`messageSeq` は翻訳対象になった `assistant/message` のイベント seq です。原文と対応付けるときに使います。
+`messageSeq` は翻訳対象になった `assistant/message` のイベント seq、`messageId` はその回答のメッセージ ID です。原文と対応付けるときに使います。
 
 ## インストール
 
@@ -75,6 +77,7 @@ curl http://127.0.0.1:11434/api/tags
     sourceLanguage: auto
     form: auto
     maxTextChars: 2000
+    numCtx: 16384
     timeoutMs: 120000
     temperature: 0.2
     enabled: true
@@ -112,6 +115,7 @@ curl http://127.0.0.1:11434/api/tags
     # targetLanguage が ja のときだけ効く。auto なら指定しない。
     form: polite
     temperature: 0
+    numCtx: 16384
 ```
 
 `targetLanguage` は言語コード（`ja`、`en`、`zh-hans` など）で指定します。
@@ -136,26 +140,6 @@ npm test
 
 Ollama の実プロセスは使わず、fetch と翻訳関数をモックして検証します。
 
-## 翻訳カード
-
-ホスト側が記録した `plugin:message-translator/translation` を、クライアント側の
-[lib/client.js](lib/client.js) が会話ノードとして描画します。回答の直後に
-「翻訳」カードが開いた状態で表示され、summary をクリックすると折りたためます。
-
-カードの表示には DSH の再起動が必要です。クライアントバンドルは起動時に
-読み込まれるため、`lib/client.js` を更新しただけでは反映されません。
-
-## 制限
-
-- 翻訳はターン完了後のバックグラウンド処理です。長い回答では翻訳が終わるまで数秒〜数十秒かかります。
-- 翻訳は会話の「翻訳」カードとして表示されます。カードは開いた状態で出るので、原文だけを見たいときは summary をクリックして折りたたんでください。
-- plugin record は実験的な保持扱いです。DSH のセッション形式移行で失われる可能性があります。
-- サブエージェントのセッションも同じ条件で翻訳対象になります。
-
-## ライセンス
-
-MIT
-
 ### 統合確認（モック Ollama）
 
 実際の Ollama を使わずに、DSH の headless プロファイルで 1 ターン流し、
@@ -176,3 +160,23 @@ pnpm dsh --profile translator-test "hello"
 `agent-default-model`）と、`message-translator` の `endpoint` をモックへ向ける
 上書きを書いてください。セッションログに `plugin:message-translator/translation`
 が `turn/end` の直前に現れれば成功です。
+
+## 翻訳カード
+
+ホスト側が記録した `plugin:message-translator/translation` を、クライアント側の
+[lib/client.js](lib/client.js) が会話ノードとして描画します。回答の直後に
+「翻訳」カードが開いた状態で表示され、summary をクリックすると折りたためます。
+
+`lib/client.js` の変更は DSH のクライアントプラグイン HMR で反映されます。
+反映されない場合は DSH Web を再起動してください。
+
+## 制限
+
+- 翻訳はターンが閉じる前に実行されます。長い回答では翻訳が終わるまで数秒〜数十秒かかり、その分だけターンの完了が遅れます。
+- 翻訳は会話の「翻訳」カードとして表示されます。カードは開いた状態で出るので、原文だけを見たいときは summary をクリックして折りたたんでください。
+- plugin record は実験的な保持扱いです。DSH のセッション形式移行で失われる可能性があります。
+- サブエージェントのセッションも同じ条件で翻訳対象になります。
+
+## ライセンス
+
+MIT
